@@ -19,6 +19,12 @@ import dnnlib
 
 _constant_cache = dict()
 
+CUSTOM_SEEDS = [1, 2, 3, 4, 5, 6, 7,
+                8, 9, 16, 17, 35, 37, 54,
+                70, 71, 75, 76, 82, 85, 89,
+                92, 95, 100, 103, 134, 137, 143,
+                259, 263, 269, 284, 292, 367, 360]
+
 def constant(value, shape=None, dtype=None, device=None, memory_format=None):
     value = np.asarray(value)
     if shape is not None:

@@ -15,6 +15,7 @@ import psutil
 import PIL.Image
 import numpy as np
 import torch
+from torchvision.utils import make_grid
 import dnnlib
 from torch_utils import misc
 from torch_utils import training_stats
@@ -119,6 +120,12 @@ def training_loop(
     abort_fn                = None,     # Callback function for determining whether to abort training. Must return consistent results across ranks.
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
 ):
+    def save_custom_grid(images, fp):
+        images = (images * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+        grid = make_grid(images, nrow=7, padding=0)
+        grid = grid.permute(1, 2, 0).numpy()
+        PIL.Image.fromarray(grid).save(fp)
+
     # Initialize.
     start_time = time.time()
     device = torch.device('cuda', rank)
@@ -221,10 +228,14 @@ def training_loop(
         print('Exporting sample images...')
         grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
         save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
-        grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
-        grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
-        images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
-        save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+        grid_z = []
+        for seed in misc.CUSTOM_SEEDS:
+            z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim))
+            grid_z.append(z)
+        grid_z = torch.cat(grid_z, dim=0).to(device=device).split(batch_gpu)
+        grid_c = torch.zeros([len(grid_z), G.c_dim], device=device)
+        images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)])
+        save_custom_grid(images, os.path.join(run_dir, 'fakes_init.png'))
 
     # Initialize logs.
     if rank == 0:
@@ -346,8 +357,8 @@ def training_loop(
 
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
-            images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
-            save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)])
+            save_custom_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'))
 
         # Save network snapshot.
         snapshot_pkl = None
