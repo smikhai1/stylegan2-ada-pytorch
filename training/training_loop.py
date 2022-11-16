@@ -124,7 +124,7 @@ def training_loop(
         images = (images * 127.5 + 128).clamp(0, 255).to(torch.uint8)
         grid = make_grid(images, nrow=7, padding=0)
         grid = grid.permute(1, 2, 0).numpy()
-        PIL.Image.fromarray(grid).save(fp)
+        PIL.Image.fromarray(grid).save(fp, quality=70)
 
     # Initialize.
     start_time = time.time()
@@ -234,8 +234,9 @@ def training_loop(
             grid_z.append(z)
         grid_z = torch.cat(grid_z, dim=0).to(device=device).split(batch_gpu)
         grid_c = torch.zeros([len(grid_z), G.c_dim], device=device)
-        images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)])
-        save_custom_grid(images, os.path.join(run_dir, 'fakes_init.png'))
+        images = torch.cat([G_ema(z=z, c=c, noise_mode='const', truncation_psi=0.7).cpu()
+                            for z, c in zip(grid_z, grid_c)])
+        save_custom_grid(images, os.path.join(run_dir, 'fakes_init.jpg'))
 
     # Initialize logs.
     if rank == 0:
@@ -357,8 +358,9 @@ def training_loop(
 
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
-            images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)])
-            save_custom_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'))
+            images = torch.cat([G_ema(z=z, c=c, noise_mode='const', truncation_psi=0.7).cpu()
+                                for z, c in zip(grid_z, grid_c)])
+            save_custom_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.jpg'))
 
         # Save network snapshot.
         snapshot_pkl = None
