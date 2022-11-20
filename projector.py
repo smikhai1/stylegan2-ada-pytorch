@@ -10,6 +10,7 @@
 
 import copy
 import os
+import os.path as osp
 from time import perf_counter
 
 import click
@@ -18,6 +19,7 @@ import numpy as np
 import PIL.Image
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 
 import dnnlib
 import legacy
@@ -134,14 +136,14 @@ def project(
 
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
-@click.option('--target', 'target_fname', help='Target image file to project to', required=True, metavar='FILE')
+@click.option('--target_dir', 'target_dir', help='Target image file to project to', required=True, metavar='FILE')
 @click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
 @click.option('--seed',                   help='Random seed', type=int, default=303, show_default=True)
 @click.option('--save-video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
 @click.option('--outdir',                 help='Where to save the output images', required=True, metavar='DIR')
 def run_projection(
     network_pkl: str,
-    target_fname: str,
+    target_dir: str,
     outdir: str,
     save_video: bool,
     seed: int,
@@ -164,45 +166,52 @@ def run_projection(
     with dnnlib.util.open_url(network_pkl) as fp:
         G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
 
-    # Load target image.
-    target_pil = PIL.Image.open(target_fname).convert('RGB')
-    w, h = target_pil.size
-    s = min(w, h)
-    target_pil = target_pil.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
-    target_pil = target_pil.resize((G.img_resolution, G.img_resolution), PIL.Image.LANCZOS)
-    target_uint8 = np.array(target_pil, dtype=np.uint8)
+    assert osp.isdir(target_dir) and len(os.listdir(target_dir))
+    proj_dir = osp.join(outdir, 'projections')
+    img_proj_dir = osp.join(outdir, 'proj_results')
+    os.makedirs(proj_dir, exist_ok=True)
+    os.makedirs(img_proj_dir, exist_ok=True)
 
-    # Optimize projection.
-    start_time = perf_counter()
-    projected_w_steps = project(
-        G,
-        target=torch.tensor(target_uint8.transpose([2, 0, 1]), device=device), # pylint: disable=not-callable
-        num_steps=num_steps,
-        device=device,
-        verbose=True
-    )
-    print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
+    for name in tqdm(os.listdir(target_dir)):
+        fname = osp.join(target_dir, name)
+        target_pil = PIL.Image.open(fname).convert('RGB')
+        w, h = target_pil.size
+        s = min(w, h)
+        target_pil = target_pil.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
+        target_pil = target_pil.resize((G.img_resolution, G.img_resolution), PIL.Image.LANCZOS)
+        target_uint8 = np.array(target_pil, dtype=np.uint8)
 
-    # Render debug output: optional video and projected image and W vector.
-    os.makedirs(outdir, exist_ok=True)
-    if save_video:
-        video = imageio.get_writer(f'{outdir}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
-        print (f'Saving optimization progress video "{outdir}/proj.mp4"')
-        for projected_w in projected_w_steps:
-            synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')
-            synth_image = (synth_image + 1) * (255/2)
-            synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-            video.append_data(np.concatenate([target_uint8, synth_image], axis=1))
-        video.close()
+        # Optimize projection.
+        start_time = perf_counter()
+        projected_w_steps = project(
+            G,
+            target=torch.tensor(target_uint8.transpose([2, 0, 1]), device=device), # pylint: disable=not-callable
+            num_steps=num_steps,
+            device=device,
+            verbose=True
+        )
+        print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
 
-    # Save final projected frame and W vector.
-    target_pil.save(f'{outdir}/target.png')
-    projected_w = projected_w_steps[-1]
-    synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')
-    synth_image = (synth_image + 1) * (255/2)
-    synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-    PIL.Image.fromarray(synth_image, 'RGB').save(f'{outdir}/proj.png')
-    np.savez(f'{outdir}/projected_w.npz', w=projected_w.unsqueeze(0).cpu().numpy())
+        # Render debug output: optional video and projected image and W vector.
+        if save_video:
+            video = imageio.get_writer(f'{outdir}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
+            print (f'Saving optimization progress video "{outdir}/proj.mp4"')
+            for projected_w in projected_w_steps:
+                synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')
+                synth_image = (synth_image + 1) * (255/2)
+                synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
+                video.append_data(np.concatenate([target_uint8, synth_image], axis=1))
+            video.close()
+
+        # Save final projected frame and W vector.
+        projected_w = projected_w_steps[-1]
+        synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')
+        synth_image = (synth_image + 1) * (255/2)
+        synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
+        PIL.Image.fromarray(synth_image, 'RGB').save(osp.join(img_proj_dir, name))
+
+        w_name = f'{osp.splitext(name)[0]}.npz'
+        np.savez(osp.join(proj_dir, w_name), w=projected_w.unsqueeze(0).cpu().numpy())
 
 #----------------------------------------------------------------------------
 
