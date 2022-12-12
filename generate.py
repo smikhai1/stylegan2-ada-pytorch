@@ -37,9 +37,10 @@ def num_range(s: str) -> List[int]:
     return [int(x) for x in vals]
 
 
-def convert_img_to_bytes(img, format='.png'):
+def convert_img_to_bytes(img, format='.png', quality=95):
     img_bgr = cv2.cvtColor(img[0], cv2.COLOR_RGB2BGR)
-    success, encoded_image = cv2.imencode(format, img_bgr)
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    success, encoded_image = cv2.imencode(format, img_bgr, encode_param)
     if not success:
         raise RuntimeError('Image wasn\'t encoded!')
     bytes = encoded_image.tobytes()
@@ -123,7 +124,7 @@ def generate_images(
         for idx, w in enumerate(ws):
             img = G.synthesis(w.unsqueeze(0), noise_mode=noise_mode)
             img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-            img = PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/proj{idx:02d}.png')
+            img = PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/proj{idx:02d}.jpg')
         return
 
     # Labels.
@@ -136,6 +137,7 @@ def generate_images(
         if class_idx is not None:
             print ('warn: --class=lbl ignored when running on an unconditional network')
 
+    save_func = partial(convert_img_to_bytes, format='.jpg', quality=65)
     # Generate images.
     if num_images is not None:
         # batch mode
@@ -147,10 +149,10 @@ def generate_images(
             imgs = np.split(imgs, np.arange(1, len(imgs)), axis=0)
 
             with mp.Pool(bs) as pool:
-                imgs_bytes = pool.map(convert_img_to_bytes, imgs)
+                imgs_bytes = pool.map(save_func, imgs)
 
             for idx in range(len(imgs_bytes)):
-                path = osp.join(outdir, f'seed{seed:06d}_idx{idx:02d}.png')
+                path = osp.join(outdir, f'seed{seed:06d}_idx{idx:02d}.jpg')
                 with open(path, 'wb') as f:
                     f.write(imgs_bytes[idx])
     else:
@@ -160,7 +162,7 @@ def generate_images(
             z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
             img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
             img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-            PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/seed{seed:04d}.png')
+            PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/seed{seed:04d}.jpg')
 
 
 #----------------------------------------------------------------------------
