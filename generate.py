@@ -139,6 +139,7 @@ def generate_images(
 
     save_func = partial(convert_img_to_bytes, format='.jpg', quality=65)
     # Generate images.
+    global_idx = 0
     if num_images is not None:
         # batch mode
         for seed in tqdm(range(int(np.ceil(num_images / bs)))):
@@ -152,9 +153,10 @@ def generate_images(
                 imgs_bytes = pool.map(save_func, imgs)
 
             for idx in range(len(imgs_bytes)):
-                path = osp.join(outdir, f'seed{seed:06d}_idx{idx:02d}.jpg')
+                path = osp.join(outdir, f'{global_idx:0>3}.jpg')
                 with open(path, 'wb') as f:
                     f.write(imgs_bytes[idx])
+                global_idx += 1
     else:
         # default non-batch mode
         for seed_idx, seed in tqdm(enumerate(seeds), total=len(seeds)):
