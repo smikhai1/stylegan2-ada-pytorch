@@ -37,14 +37,15 @@ def num_range(s: str) -> List[int]:
     return [int(x) for x in vals]
 
 
-def convert_img_to_bytes(img, format='.png', quality=95):
+def convert_img_to_bytes(imgs_with_idxs, format='.png', quality=95):
+    img, idx = imgs_with_idxs
     img_bgr = cv2.cvtColor(img[0], cv2.COLOR_RGB2BGR)
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     success, encoded_image = cv2.imencode(format, img_bgr, encode_param)
     if not success:
         raise RuntimeError('Image wasn\'t encoded!')
     bytes = encoded_image.tobytes()
-    return bytes
+    return bytes, idx
 
 
 #----------------------------------------------------------------------------
@@ -148,14 +149,16 @@ def generate_images(
             imgs = (imgs.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
             imgs = imgs.cpu().numpy()
             imgs = np.split(imgs, np.arange(1, len(imgs)), axis=0)
+            imgs_idxs = np.arange(len(imgs)).tolist()
 
             with mp.Pool(bs) as pool:
-                imgs_bytes = pool.map(save_func, imgs)
+                imgs_with_idxs = pool.map(save_func, zip(imgs, imgs_idxs))
 
-            for idx in range(len(imgs_bytes)):
+            imgs_with_idxs = sorted(imgs_with_idxs, key=lambda x: x[1])  # sort images by their idxs
+            for img_bytes, _ in imgs_with_idxs:
                 path = osp.join(outdir, f'{global_idx:0>3}.jpg')
                 with open(path, 'wb') as f:
-                    f.write(imgs_bytes[idx])
+                    f.write(img_bytes)
                 global_idx += 1
     else:
         # default non-batch mode
