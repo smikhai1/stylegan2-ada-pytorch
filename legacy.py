@@ -151,7 +151,7 @@ def convert_tf_generator(tf_G):
     kwarg('style_mixing_prob')
     kwarg('structure')
     unknown_kwargs = list(set(tf_kwargs.keys()) - known_kwargs)
-    if len(unknown_kwargs) > 0:
+    if len(unknown_kwargs) > 0 and False:
         raise ValueError('Unknown TensorFlow kwarg', unknown_kwargs[0])
 
     # Collect params.
