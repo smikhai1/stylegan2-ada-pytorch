@@ -5,7 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
-
+import glob
 import os
 import numpy as np
 import zipfile
@@ -155,6 +155,7 @@ class ImageFolderDataset(Dataset):
     def __init__(self,
         path,                   # Path to directory or zip.
         resolution      = None, # Ensure specific resolution, None = highest available.
+        names_to_use_fp = None,
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
         self._path = path
@@ -162,7 +163,7 @@ class ImageFolderDataset(Dataset):
 
         if os.path.isdir(self._path):
             self._type = 'dir'
-            self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path) for root, _dirs, files in os.walk(self._path) for fname in files}
+            self._all_fnames = {os.path.basename(fp) for fp in glob.glob(os.path.join(self._path, '*.*g'))}
         elif self._file_ext(self._path) == '.zip':
             self._type = 'zip'
             self._all_fnames = set(self._get_zipfile().namelist())
@@ -171,10 +172,17 @@ class ImageFolderDataset(Dataset):
 
         PIL.Image.init()
         self._image_fnames = sorted(fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
+
+        if names_to_use_fp is not None:
+            with open(names_to_use_fp, 'r') as f:
+                names_to_use = {line.strip() for line in f.readlines()}
+            self._image_fnames = [name for name in self._image_fnames
+                                  if os.path.splitext(name)[0] in names_to_use]
+
         if len(self._image_fnames) == 0:
             raise IOError('No image files found in the specified path')
 
-        name = os.path.splitext(os.path.basename(self._path))[0]
+        name = os.path.splitext(os.path.basename(os.path.dirname(self._path)))[0]
         raw_shape = [len(self._image_fnames)] + list(self._load_raw_image(0).shape)
         if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
             raise IOError('Image files do not match the specified resolution')
@@ -213,7 +221,7 @@ class ImageFolderDataset(Dataset):
             if pyspng is not None and self._file_ext(fname) == '.png':
                 image = pyspng.load(f.read())
             else:
-                image = np.array(PIL.Image.open(f))
+                image = np.array(PIL.Image.open(f).convert('RGB'))
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
